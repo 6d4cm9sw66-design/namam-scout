@@ -235,8 +235,10 @@ def discover_artist_ids(sp, max_artists):
 
     # Artist-search eerst: die geeft een volledig profiel (followers/genres/
     # popularity) terug, zodat we niet afhankelijk zijn van de batch-endpoint
-    # /v1/artists (die op deze app 403 Forbidden geeft).
-    for q in ARTIST_QUERIES:
+    # /v1/artists (die op deze app 403 Forbidden geeft). Genre-gefilterde
+    # artist-queries geven vaak 400/leeg terug; de KEYWORD_QUERIES als platte
+    # tekst-zoekopdracht (type=artist) werken wel en leveren volledige profielen.
+    for q in ARTIST_QUERIES + KEYWORD_QUERIES:
         if len(ids) >= max_artists:
             break
         add_from_artists(q)
@@ -247,6 +249,14 @@ def discover_artist_ids(sp, max_artists):
 
     print(f"  {len(ids)} unieke kandidaat-artiesten verzameld via search")
     print(f"  {len(full_objs)} met volledig profiel (via artist-search)")
+
+    # DIAGNOSE: werkt de single-artist endpoint /artists/{id}? (batch = 403)
+    if ids:
+        first_id = next(iter(ids))
+        single = sp.get(f"/artists/{first_id}")
+        print(f"  [probe] single /artists/{{id}} -> "
+              f"{'OK' if single else 'None/geblokkeerd'}", file=sys.stderr)
+
     return ids, full_objs
 
 
@@ -298,12 +308,18 @@ def enrich_and_filter(sp, id_map, full_objs, max_artists):
     all_ids = list(id_map.keys())[:max_artists]
     matches = []
     skipped_no_profile = 0
+    enriched_single = 0
 
     for aid in all_ids:
         a = full_objs.get(aid)
         if not a:
-            skipped_no_profile += 1
-            continue
+            # Geen profiel uit artist-search: probeer de single-artist endpoint.
+            # (De batch /v1/artists is 403; single /artists/{id} vaak wel.)
+            a = sp.get(f"/artists/{aid}")
+            if not a:
+                skipped_no_profile += 1
+                continue
+            enriched_single += 1
         followers = a.get("followers", {}).get("total", 0)
         popularity = a.get("popularity", 0)
         genres = a.get("genres", [])
@@ -337,8 +353,10 @@ def enrich_and_filter(sp, id_map, full_objs, max_artists):
         })
         time.sleep(0.05)
 
+    if enriched_single:
+        print(f"  {enriched_single} verrijkt via single /artists/{{id}}")
     if skipped_no_profile:
-        print(f"  {skipped_no_profile} overgeslagen (alleen via track-search, geen profiel)")
+        print(f"  {skipped_no_profile} overgeslagen (geen profiel beschikbaar)")
     print(f"  {len(matches)} artiesten door de filters")
     return matches
 
