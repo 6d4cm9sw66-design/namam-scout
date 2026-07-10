@@ -196,6 +196,7 @@ def discover_artist_ids(sp, max_artists):
     """Verzamel kandidaat-artiest-IDs via search. Editorial playlists gebruiken
     we bewust niet (die geven 404 voor nieuwe apps)."""
     ids = {}
+    full_objs = {}  # volledige artiest-objecten uit /search (voor filtering)
 
     # DIAGNOSE: kaalste mogelijke search-call (alleen q + type, geen limit).
     probe = sp.get("/search", {"q": "test", "type": "track"})
@@ -228,20 +229,25 @@ def discover_artist_ids(sp, max_artists):
                 break
             for a in items:
                 ids.setdefault(a["id"], query)
+                full_objs[a["id"]] = a  # /search geeft volledig profiel terug
             offset += 20
             time.sleep(0.1)
 
-    for q in KEYWORD_QUERIES + FILTERED_TRACK_QUERIES:
-        if len(ids) >= max_artists:
-            break
-        add_from_tracks(q)
+    # Artist-search eerst: die geeft een volledig profiel (followers/genres/
+    # popularity) terug, zodat we niet afhankelijk zijn van de batch-endpoint
+    # /v1/artists (die op deze app 403 Forbidden geeft).
     for q in ARTIST_QUERIES:
         if len(ids) >= max_artists:
             break
         add_from_artists(q)
+    for q in KEYWORD_QUERIES + FILTERED_TRACK_QUERIES:
+        if len(ids) >= max_artists:
+            break
+        add_from_tracks(q)
 
     print(f"  {len(ids)} unieke kandidaat-artiesten verzameld via search")
-    return ids
+    print(f"  {len(full_objs)} met volledig profiel (via artist-search)")
+    return ids, full_objs
 
 
 def genre_ok(genres):
@@ -281,53 +287,58 @@ def label_is_major(label):
     return any(s in low for s in SKIP_LABELS)
 
 
-def enrich_and_filter(sp, id_map, max_artists):
-    """Haal artiestcijfers op, filter, en check het label. Return matches."""
+def enrich_and_filter(sp, id_map, full_objs, max_artists):
+    """Filter kandidaten en check het label. Return matches.
+
+    We gebruiken de volledige artiest-objecten die /search (type=artist) al
+    teruggeeft (followers, popularity, genres). De batch-endpoint /v1/artists
+    geeft 403 Forbidden op deze app, dus die vermijden we volledig. Kandidaten
+    die alleen via track-search zijn gevonden hebben geen volledig profiel en
+    slaan we over."""
     all_ids = list(id_map.keys())[:max_artists]
     matches = []
+    skipped_no_profile = 0
 
-    # artiesten in batches van 50
-    for i in range(0, len(all_ids), 50):
-        batch = all_ids[i:i + 50]
-        data = sp.get("/artists", {"ids": ",".join(batch)})
-        artists = (data or {}).get("artists", [])
-        for a in artists:
-            if not a:
-                continue
-            followers = a.get("followers", {}).get("total", 0)
-            popularity = a.get("popularity", 0)
-            genres = a.get("genres", [])
+    for aid in all_ids:
+        a = full_objs.get(aid)
+        if not a:
+            skipped_no_profile += 1
+            continue
+        followers = a.get("followers", {}).get("total", 0)
+        popularity = a.get("popularity", 0)
+        genres = a.get("genres", [])
 
-            if not (FOLLOWERS_MIN <= followers <= FOLLOWERS_MAX):
-                continue
-            if popularity < POPULARITY_MIN:
-                continue
-            keep, greason = genre_ok(genres)
-            if not keep:
-                continue
+        if not (FOLLOWERS_MIN <= followers <= FOLLOWERS_MAX):
+            continue
+        if popularity < POPULARITY_MIN:
+            continue
+        keep, greason = genre_ok(genres)
+        if not keep:
+            continue
 
-            release_count, label, last_date = latest_label(sp, a["id"])
-            if release_count > RELEASE_COUNT_MAX:
-                continue
-            if label_is_major(label):
-                continue  # master zit bij een major / grote indie
+        release_count, label, last_date = latest_label(sp, a["id"])
+        if release_count > RELEASE_COUNT_MAX:
+            continue
+        if label_is_major(label):
+            continue  # master zit bij een major / grote indie
 
-            matches.append({
-                "id": a["id"],
-                "name": a["name"],
-                "spotify_url": a["external_urls"]["spotify"],
-                "followers": followers,
-                "popularity": popularity,
-                "genres": genres,
-                "genre_note": greason,
-                "release_count": release_count,
-                "latest_label": label or "onbekend",
-                "latest_release": last_date,
-                "found_via": id_map[a["id"]],
-            })
-            time.sleep(0.1)
-        time.sleep(0.1)
+        matches.append({
+            "id": a["id"],
+            "name": a["name"],
+            "spotify_url": a["external_urls"]["spotify"],
+            "followers": followers,
+            "popularity": popularity,
+            "genres": genres,
+            "genre_note": greason,
+            "release_count": release_count,
+            "latest_label": label or "onbekend",
+            "latest_release": last_date,
+            "found_via": id_map[a["id"]],
+        })
+        time.sleep(0.05)
 
+    if skipped_no_profile:
+        print(f"  {skipped_no_profile} overgeslagen (alleen via track-search, geen profiel)")
     print(f"  {len(matches)} artiesten door de filters")
     return matches
 
@@ -508,9 +519,9 @@ def main():
             sys.exit(1)
         sp = Spotify(cid, secret)
         print("Ingelogd bij Spotify. Discovery...")
-        id_map = discover_artist_ids(sp, args.max)
+        id_map, full_objs = discover_artist_ids(sp, args.max)
         print("Filteren en labels checken...")
-        matches = enrich_and_filter(sp, id_map, args.max)
+        matches = enrich_and_filter(sp, id_map, full_objs, args.max)
         db = merge(db, matches)
 
     save_db(db)
