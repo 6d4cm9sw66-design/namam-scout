@@ -197,12 +197,16 @@ def discover_artist_ids(sp, max_artists):
     we bewust niet (die geven 404 voor nieuwe apps)."""
     ids = {}
 
+    # DIAGNOSE: kaalste mogelijke search-call (alleen q + type, geen limit).
+    probe = sp.get("/search", {"q": "test", "type": "track"})
+    n_probe = len(((probe or {}).get("tracks", {}) or {}).get("items", []))
+    print(f"  [probe] kale search q=test type=track -> {n_probe} tracks", file=sys.stderr)
+
     def add_from_tracks(query):
         offset = 0
         while offset < 100 and len(ids) < max_artists:  # 5 paginas van 20
             data = sp.get("/search", {
-                "q": query, "type": "track", "market": MARKET,
-                "limit": 20, "offset": offset,
+                "q": query, "type": "track", "offset": offset,
             })
             items = (data or {}).get("tracks", {}).get("items", [])
             if not items:
@@ -217,8 +221,7 @@ def discover_artist_ids(sp, max_artists):
         offset = 0
         while offset < 100 and len(ids) < max_artists:
             data = sp.get("/search", {
-                "q": query, "type": "artist", "market": MARKET,
-                "limit": 20, "offset": offset,
+                "q": query, "type": "artist", "offset": offset,
             })
             items = (data or {}).get("artists", {}).get("items", [])
             if not items:
