@@ -1,0 +1,11 @@
+# Nooit je secret online zetten
+.env
+
+# Python rommel
+.venv/
+__pycache__/
+*.pyc
+
+# LET OP: watchlist.json en scout.html worden BEWUST WEL meegecommit.
+# Die bevatten de state (dedupe + je handmatige status per artiest) en de lijst
+# die op je telefoon getoond wordt. Niet negeren dus.
