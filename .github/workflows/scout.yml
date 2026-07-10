@@ -1,0 +1,72 @@
+name: NAMAM Scout (dagelijks)
+
+# Draait elke ochtend automatisch, en handmatig via de "Run workflow"-knop.
+on:
+  schedule:
+    # 06:00 UTC = 08:00 in NL zomertijd (CEST) / 07:00 in wintertijd (CET).
+    # GitHub kan een geplande run een kwartier tot soms een uur later starten;
+    # dat is normaal voor gratis runners. Tijd aanpassen? Verander alleen dit getal.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+# Rechten: 'contents' om watchlist.json/scout.html terug te committen (state),
+# 'pages' + 'id-token' om de webpagina te publiceren.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Voorkomt dat twee runs tegelijk publiceren.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo ophalen
+        uses: actions/checkout@v4
+
+      - name: Python installeren
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencies installeren
+        run: pip install -r requirements.txt
+
+      - name: Scout draaien
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+        run: python scout.py
+
+      - name: State terug-committen (watchlist + html)
+        run: |
+          git config user.name "namam-scout-bot"
+          git config user.email "namam-scout-bot@users.noreply.github.com"
+          git add watchlist.json scout.html
+          git commit -m "Scout-run $(date -u +%F)" || echo "Geen wijzigingen om te committen."
+          git push
+
+      - name: Pagina klaarzetten
+        run: |
+          mkdir -p _site
+          cp scout.html _site/index.html
+
+      - name: Pagina uploaden
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publiceren naar GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
