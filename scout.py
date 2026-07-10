@@ -199,10 +199,10 @@ def discover_artist_ids(sp, max_artists):
 
     def add_from_tracks(query):
         offset = 0
-        while offset < 150 and len(ids) < max_artists:  # 3 paginas van 50
+        while offset < 100 and len(ids) < max_artists:  # 5 paginas van 20
             data = sp.get("/search", {
                 "q": query, "type": "track", "market": MARKET,
-                "limit": 50, "offset": offset,
+                "limit": 20, "offset": offset,
             })
             items = (data or {}).get("tracks", {}).get("items", [])
             if not items:
@@ -210,22 +210,22 @@ def discover_artist_ids(sp, max_artists):
             for tr in items:
                 for a in tr.get("artists", []):
                     ids.setdefault(a["id"], query)
-            offset += 50
+            offset += 20
             time.sleep(0.1)
 
     def add_from_artists(query):
         offset = 0
-        while offset < 150 and len(ids) < max_artists:
+        while offset < 100 and len(ids) < max_artists:
             data = sp.get("/search", {
                 "q": query, "type": "artist", "market": MARKET,
-                "limit": 50, "offset": offset,
+                "limit": 20, "offset": offset,
             })
             items = (data or {}).get("artists", {}).get("items", [])
             if not items:
                 break
             for a in items:
                 ids.setdefault(a["id"], query)
-            offset += 50
+            offset += 20
             time.sleep(0.1)
 
     for q in KEYWORD_QUERIES + FILTERED_TRACK_QUERIES:
