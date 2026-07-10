@@ -94,20 +94,25 @@ GENRE_BLOCK = [
 CURRENT_YEAR = dt.date.today().year
 YEARS = f"{CURRENT_YEAR-1}-{CURRENT_YEAR}"
 
-TRACK_QUERIES = [
+# PRIMAIRE discovery: platte Nederlandstalige seed-woorden ZONDER field-filters.
+# Deze kunnen niet 400'en (Spotify's search field-filters zoals year:/genre:/
+# tag:new geven op de huidige API vaak HTTP 400). Met market=NL en Nederlandse
+# woorden skewen de resultaten sterk naar NL-acts. Vroege-carriere-filtering
+# gebeurt daarna client-side (followers-band + release_count<=20 + genre_ok).
+KEYWORD_QUERIES = [
+    "liefde", "alleen", "zonder jou", "blijf bij mij", "thuis",
+    "voor altijd", "jij en ik", "hart", "verliefd", "mijn liefde",
+    "samen", "nooit meer", "vanavond", "droom", "gevoel",
+    "dansen", "hou van jou", "voor jou", "mooie dag", "terug",
+]
+# BONUS discovery: field-filtered track-searches. Als Spotify hier 400 op geeft
+# vangt get() dat af (None -> overslaan); de KEYWORD_QUERIES leveren dan alsnog.
+FILTERED_TRACK_QUERIES = [
     f'genre:"dutch pop" year:{YEARS}',
     f'genre:"nederpop" year:{YEARS}',
     f'genre:"dutch indie" year:{YEARS}',
-    f'genre:"pop" year:{YEARS} tag:new',
-    'tag:new genre:"nederpop"',
-    'tag:new genre:"dutch pop"',
 ]
-# Nederlandstalige seed-woorden die vaak in nederpop-titels zitten. Vangt acts
-# die nog geen genre-tag hebben maar wel Nederlandstalig releasen.
-KEYWORD_QUERIES = [
-    f'liefde year:{YEARS}', f'alleen year:{YEARS}', f'jij year:{YEARS}',
-    f'thuis year:{YEARS}', f'zonder jou year:{YEARS}', f'blijf year:{YEARS}',
-]
+# BONUS discovery: genre artist-searches (ook best-effort; 400 -> overslaan).
 ARTIST_QUERIES = [
     'genre:"nederpop"', 'genre:"dutch pop"', 'genre:"dutch indie"',
 ]
@@ -178,7 +183,7 @@ class Spotify:
             return None  # bv. editorial playlist (verwacht) of verwijderd item
         if r.status_code >= 400:
             # niet fataal: log en ga door, zodat een run niet op 1 item klapt
-            print(f"  ! {r.status_code} op {url} -> overslaan", file=sys.stderr)
+            print(f"  ! {r.status_code} op {url} params={params} -> {r.text[:300]}", file=sys.stderr)
             return None
         return r.json()
 
@@ -223,7 +228,7 @@ def discover_artist_ids(sp, max_artists):
             offset += 50
             time.sleep(0.1)
 
-    for q in TRACK_QUERIES + KEYWORD_QUERIES:
+    for q in KEYWORD_QUERIES + FILTERED_TRACK_QUERIES:
         if len(ids) >= max_artists:
             break
         add_from_tracks(q)
